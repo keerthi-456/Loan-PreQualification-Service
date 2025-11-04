@@ -3,17 +3,16 @@
 Following TDD principles with mocked database dependencies.
 """
 
-from datetime import datetime
 from decimal import Decimal
-from unittest.mock import AsyncMock, MagicMock, Mock, patch
+from unittest.mock import AsyncMock, MagicMock, Mock
 from uuid import uuid4
 
 import pytest
+from shared.exceptions.exceptions import DatabaseError
+from shared.models.application import Application
 from sqlalchemy.exc import SQLAlchemyError
 
 from app.repositories.application_repository import ApplicationRepository
-from shared.exceptions.exceptions import DatabaseError
-from shared.models.application import Application
 
 
 class TestApplicationRepositorySave:
@@ -22,8 +21,11 @@ class TestApplicationRepositorySave:
     @pytest.mark.asyncio
     async def test_save_application_success(self):
         """Test successfully saving an application."""
-        # Create mock database session
+        # Create mock database session with correct sync/async methods
         mock_db = AsyncMock()
+        mock_db.add = Mock()  # add() is synchronous
+        mock_db.commit = AsyncMock()  # commit() is async
+        mock_db.refresh = AsyncMock()  # refresh() is async
         repository = ApplicationRepository(mock_db)
 
         # Create test application
@@ -51,7 +53,9 @@ class TestApplicationRepositorySave:
     async def test_save_application_database_error(self):
         """Test save() handles database errors properly."""
         mock_db = AsyncMock()
-        mock_db.commit.side_effect = SQLAlchemyError("Database connection failed")
+        mock_db.add = Mock()  # add() is synchronous
+        mock_db.commit = AsyncMock(side_effect=SQLAlchemyError("Database connection failed"))
+        mock_db.rollback = AsyncMock()  # rollback() is async
         repository = ApplicationRepository(mock_db)
 
         application = Application(
@@ -285,7 +289,17 @@ class TestApplicationRepositoryUpdateStatus:
     async def test_update_status_database_error(self):
         """Test update_status() handles database errors."""
         mock_db = AsyncMock()
-        mock_db.begin_nested.side_effect = SQLAlchemyError("Database lock failed")
+        mock_db.rollback = AsyncMock()  # rollback() is async
+
+        # Make begin_nested raise error when entering context
+        class FailingAsyncContextManager:
+            async def __aenter__(self):
+                raise SQLAlchemyError("Database lock failed")
+
+            async def __aexit__(self, exc_type, exc_val, exc_tb):
+                return None
+
+        mock_db.begin_nested = MagicMock(return_value=FailingAsyncContextManager())
         repository = ApplicationRepository(mock_db)
 
         # Verify exception is raised and rollback is called

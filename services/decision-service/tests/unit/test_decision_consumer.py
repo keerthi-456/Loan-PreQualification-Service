@@ -398,6 +398,7 @@ class TestDecisionConsumerConsumeLoop:
 
         mock_consumer = MagicMock()
         mock_consumer.__aiter__ = lambda self: async_iterator()
+        mock_consumer.commit = AsyncMock()  # commit() is async
         consumer.consumer = mock_consumer
 
         with patch("app.consumers.decision_consumer.async_session_maker") as mock_session:

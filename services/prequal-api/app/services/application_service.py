@@ -27,13 +27,15 @@ logger = get_logger(__name__)
 class ApplicationService:
     """Service layer for application business logic."""
 
-    def __init__(self, db: AsyncSession, kafka_producer: KafkaProducerWrapper, topic_name: str):
+    def __init__(
+        self, db: AsyncSession, kafka_producer: KafkaProducerWrapper | None, topic_name: str
+    ):
         """
         Initialize application service.
 
         Args:
             db: Async database session
-            kafka_producer: Kafka producer instance
+            kafka_producer: Kafka producer instance (optional, only needed for create operations)
             topic_name: Kafka topic for application submissions
         """
         self.repository = ApplicationRepository(db)
@@ -168,7 +170,11 @@ class ApplicationService:
 
         Raises:
             KafkaPublishError: If publishing fails after retries
+            RuntimeError: If kafka_producer is not initialized
         """
+        if self.kafka_producer is None:
+            raise RuntimeError("Kafka producer not initialized")
+
         message = LoanApplicationMessage(
             application_id=application.id,
             pan_number=application.pan_number,

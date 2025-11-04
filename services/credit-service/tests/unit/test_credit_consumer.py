@@ -417,8 +417,9 @@ class TestShutdownSignalHandler:
 
     def test_handle_shutdown_signal_with_sigint(self):
         """Test signal handler with SIGINT."""
-        from app.consumers.credit_consumer import handle_shutdown_signal, shutdown_event
         import signal
+
+        from app.consumers.credit_consumer import handle_shutdown_signal, shutdown_event
 
         shutdown_event.clear()
 

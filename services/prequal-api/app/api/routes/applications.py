@@ -111,7 +111,6 @@ async def create_application(
 async def get_application_status(
     application_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    kafka_producer: KafkaProducerWrapper = Depends(get_kafka_producer),
 ) -> ApplicationStatusResponse:
     """
     Get the current status of a loan application.
@@ -128,9 +127,10 @@ async def get_application_status(
     logger.info("Application status requested", application_id=str(application_id))
 
     try:
+        # Note: kafka_producer not needed for read-only status check
         service = ApplicationService(
             db=db,
-            kafka_producer=kafka_producer,
+            kafka_producer=None,  # Not used for status retrieval
             topic_name=settings.kafka_topic_applications_submitted,
         )
 

@@ -53,6 +53,8 @@ This starts:
 - credit-service
 - decision-service
 
+**✨ Note**: Database migrations run automatically on startup. No manual steps needed!
+
 ### Access the API
 
 - **API Base**: http://localhost:8000

@@ -50,11 +50,20 @@ COPY --from=builder /usr/local/bin /usr/local/bin
 # Copy application code
 COPY services/decision-service/app ./app
 
+# Copy entrypoint script (no migrations needed - handled by prequal-api)
+COPY services/decision-service/entrypoint.sh ./entrypoint.sh
+
+# Make entrypoint executable
+RUN chmod +x ./entrypoint.sh
+
 # Change ownership
 RUN chown -R appuser:appuser /app
 
 # Switch to non-root user
 USER appuser
+
+# Set entrypoint
+ENTRYPOINT ["./entrypoint.sh"]
 
 # Run application
 CMD ["python", "-m", "app.main"]

@@ -50,6 +50,16 @@ COPY --from=builder /usr/local/bin /usr/local/bin
 # Copy application code
 COPY services/prequal-api/app ./app
 
+# Copy alembic migrations
+COPY alembic ./alembic
+COPY alembic.ini ./alembic.ini
+
+# Copy entrypoint script
+COPY services/prequal-api/entrypoint.sh ./entrypoint.sh
+
+# Make entrypoint executable
+RUN chmod +x ./entrypoint.sh
+
 # Change ownership
 RUN chown -R appuser:appuser /app
 
@@ -62,6 +72,9 @@ EXPOSE 8000
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
     CMD python -c "import httpx; httpx.get('http://localhost:8000/health', timeout=5.0)" || exit 1
+
+# Set entrypoint
+ENTRYPOINT ["./entrypoint.sh"]
 
 # Run application
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]

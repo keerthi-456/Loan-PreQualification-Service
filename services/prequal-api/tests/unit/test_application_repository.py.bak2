@@ -1,0 +1,619 @@
+"""Unit tests for ApplicationRepository with mocked database session.
+
+These tests mock the database session to test repository logic
+without requiring a real database connection.
+"""
+
+import uuid
+from decimal import Decimal
+from unittest.mock import AsyncMock, MagicMock
+
+import pytest
+from shared.exceptions.exceptions import DatabaseError
+from shared.models.application import Application
+from sqlalchemy.exc import SQLAlchemyError
+
+# Add prequal-api path for app.repositories imports
+prequal_api_path = Path(__file__).parent.parent.parent.parent / "services" / "prequal-api"
+if str(prequal_api_path) not in sys.path:
+    sys.path.insert(0, str(prequal_api_path))
+
+from app.repositories.application_repository import ApplicationRepository
+
+
+@pytest.fixture
+def mock_db_session():
+    """Create a mock AsyncSession."""
+    session = AsyncMock()
+    session.add = MagicMock()
+    session.commit = AsyncMock()
+    session.refresh = AsyncMock()
+    session.rollback = AsyncMock()
+    session.execute = AsyncMock()
+    session.close = AsyncMock()
+    session.begin_nested = AsyncMock()
+    return session
+
+
+@pytest.fixture
+def repository(mock_db_session):
+    """Create ApplicationRepository with mocked session."""
+    return ApplicationRepository(mock_db_session)
+
+
+class TestApplicationRepositorySave:
+    """Test suite for repository save operations."""
+
+    @pytest.mark.asyncio
+    async def test_save_application_success(self, repository, mock_db_session):
+        """Test successfully saving a new application."""
+        # Create application
+        application = Application(
+            id=uuid.uuid4(),
+            pan_number="ABCDE1234F",
+            applicant_name="Rajesh Kumar",
+            monthly_income_inr=Decimal("75000.00"),
+            loan_amount_inr=Decimal("500000.00"),
+            loan_type="PERSONAL",
+            status="PENDING",
+        )
+
+        # Save application
+        saved_app = await repository.save(application)
+
+        # Verify database operations
+        mock_db_session.add.assert_called_once_with(application)
+        mock_db_session.commit.assert_awaited_once()
+        mock_db_session.refresh.assert_awaited_once_with(application)
+
+        # Verify returned application
+        assert saved_app == application
+
+    @pytest.mark.asyncio
+    async def test_save_application_database_error_rolls_back(self, repository, mock_db_session):
+        """Test that database error triggers rollback."""
+        application = Application(
+            id=uuid.uuid4(),
+            pan_number="ABCDE1234F",
+            monthly_income_inr=Decimal("50000.00"),
+            loan_amount_inr=Decimal("200000.00"),
+            status="PENDING",
+        )
+
+        # Mock commit to raise SQLAlchemyError
+        mock_db_session.commit.side_effect = SQLAlchemyError("Connection lost")
+
+        # Verify DatabaseError is raised
+        with pytest.raises(DatabaseError) as exc_info:
+            await repository.save(application)
+
+        # Verify rollback was called
+        mock_db_session.rollback.assert_awaited_once()
+
+        # Verify error message
+        assert "Failed to save application" in str(exc_info.value)
+        assert "Connection lost" in str(exc_info.value)
+
+    @pytest.mark.asyncio
+    async def test_save_application_adds_to_session(self, repository, mock_db_session):
+        """Test that application is added to session."""
+        application = Application(
+            id=uuid.uuid4(),
+            pan_number="FGHIJ5678K",
+            monthly_income_inr=Decimal("60000.00"),
+            loan_amount_inr=Decimal("300000.00"),
+            status="PENDING",
+        )
+
+        await repository.save(application)
+
+        mock_db_session.add.assert_called_once_with(application)
+
+    @pytest.mark.asyncio
+    async def test_save_application_refreshes_instance(self, repository, mock_db_session):
+        """Test that application instance is refreshed after commit."""
+        application = Application(
+            id=uuid.uuid4(),
+            pan_number="LMNOP9012Q",
+            monthly_income_inr=Decimal("80000.00"),
+            loan_amount_inr=Decimal("500000.00"),
+            status="PENDING",
+        )
+
+        await repository.save(application)
+
+        mock_db_session.refresh.assert_awaited_once_with(application)
+
+
+class TestApplicationRepositoryFindById:
+    """Test suite for repository find_by_id operations."""
+
+    @pytest.mark.asyncio
+    async def test_find_by_id_existing_application(self, repository, mock_db_session):
+        """Test finding an existing application by ID."""
+        app_id = uuid.uuid4()
+
+        # Mock application
+        mock_app = Application(
+            id=app_id,
+            pan_number="ABCDE1234F",
+            applicant_name="Test User",
+            monthly_income_inr=Decimal("50000.00"),
+            loan_amount_inr=Decimal("200000.00"),
+            loan_type="PERSONAL",
+            status="PENDING",
+        )
+
+        # Mock query result
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = mock_app
+        mock_db_session.execute.return_value = mock_result
+
+        # Find application
+        found_app = await repository.find_by_id(app_id)
+
+        # Verify query was executed
+        mock_db_session.execute.assert_awaited_once()
+
+        # Verify result
+        assert found_app == mock_app
+        assert found_app.id == app_id
+
+    @pytest.mark.asyncio
+    async def test_find_by_id_non_existent_returns_none(self, repository, mock_db_session):
+        """Test finding a non-existent application returns None."""
+        non_existent_id = uuid.uuid4()
+
+        # Mock query result returning None
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = None
+        mock_db_session.execute.return_value = mock_result
+
+        # Find application
+        found_app = await repository.find_by_id(non_existent_id)
+
+        # Verify result
+        assert found_app is None
+
+    @pytest.mark.asyncio
+    async def test_find_by_id_database_error_raises_exception(self, repository, mock_db_session):
+        """Test that database error raises DatabaseError."""
+        app_id = uuid.uuid4()
+
+        # Mock execute to raise SQLAlchemyError
+        mock_db_session.execute.side_effect = SQLAlchemyError("Query failed")
+
+        # Verify DatabaseError is raised
+        with pytest.raises(DatabaseError) as exc_info:
+            await repository.find_by_id(app_id)
+
+        assert "Failed to find application" in str(exc_info.value)
+
+    @pytest.mark.asyncio
+    async def test_find_by_id_with_pending_status(self, repository, mock_db_session):
+        """Test finding application with PENDING status."""
+        app_id = uuid.uuid4()
+        mock_app = Application(
+            id=app_id,
+            pan_number="ABCDE1234F",
+            monthly_income_inr=Decimal("50000.00"),
+            loan_amount_inr=Decimal("200000.00"),
+            status="PENDING",
+        )
+
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = mock_app
+        mock_db_session.execute.return_value = mock_result
+
+        found_app = await repository.find_by_id(app_id)
+
+        assert found_app.status == "PENDING"
+
+    @pytest.mark.asyncio
+    async def test_find_by_id_with_approved_status(self, repository, mock_db_session):
+        """Test finding application with PRE_APPROVED status."""
+        app_id = uuid.uuid4()
+        mock_app = Application(
+            id=app_id,
+            pan_number="ABCDE1234F",
+            monthly_income_inr=Decimal("80000.00"),
+            loan_amount_inr=Decimal("500000.00"),
+            status="PRE_APPROVED",
+            cibil_score=750,
+        )
+
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = mock_app
+        mock_db_session.execute.return_value = mock_result
+
+        found_app = await repository.find_by_id(app_id)
+
+        assert found_app.status == "PRE_APPROVED"
+        assert found_app.cibil_score == 750
+
+
+class TestApplicationRepositoryUpdateStatus:
+    """Test suite for repository update_status operations."""
+
+    @pytest.mark.asyncio
+    async def test_update_status_pending_to_approved(self, repository, mock_db_session):
+        """Test updating application status from PENDING to PRE_APPROVED."""
+        app_id = uuid.uuid4()
+
+        # Mock application with PENDING status
+        mock_app = Application(
+            id=app_id,
+            pan_number="ABCDE1234F",
+            monthly_income_inr=Decimal("75000.00"),
+            loan_amount_inr=Decimal("500000.00"),
+            status="PENDING",
+        )
+
+        # Mock nested transaction as async context manager
+        mock_nested = AsyncMock()
+        mock_nested.__aenter__ = AsyncMock(return_value=None)
+        mock_nested.__aexit__ = AsyncMock(return_value=None)
+        mock_db_session.begin_nested = MagicMock(return_value=mock_nested)
+
+        # Mock query result
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = mock_app
+        mock_db_session.execute.return_value = mock_result
+
+        # Update status
+        result = await repository.update_status(app_id, "PRE_APPROVED", cibil_score=750)
+
+        # Verify update
+        assert result is True
+        assert mock_app.status == "PRE_APPROVED"
+        assert mock_app.cibil_score == 750
+        mock_db_session.commit.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_update_status_pending_to_rejected(self, repository, mock_db_session):
+        """Test updating application status from PENDING to REJECTED."""
+        app_id = uuid.uuid4()
+        mock_app = Application(
+            id=app_id,
+            pan_number="FGHIJ5678K",
+            monthly_income_inr=Decimal("30000.00"),
+            loan_amount_inr=Decimal("200000.00"),
+            status="PENDING",
+        )
+
+        mock_nested = AsyncMock()
+        mock_nested.__aenter__ = AsyncMock(return_value=None)
+        mock_nested.__aexit__ = AsyncMock(return_value=None)
+        mock_db_session.begin_nested = MagicMock(return_value=mock_nested)
+
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = mock_app
+        mock_db_session.execute.return_value = mock_result
+
+        result = await repository.update_status(app_id, "REJECTED", cibil_score=620)
+
+        assert result is True
+        assert mock_app.status == "REJECTED"
+        assert mock_app.cibil_score == 620
+
+    @pytest.mark.asyncio
+    async def test_update_status_pending_to_manual_review(self, repository, mock_db_session):
+        """Test updating application status from PENDING to MANUAL_REVIEW."""
+        app_id = uuid.uuid4()
+        mock_app = Application(
+            id=app_id,
+            pan_number="LMNOP9012Q",
+            monthly_income_inr=Decimal("50000.00"),
+            loan_amount_inr=Decimal("500000.00"),
+            status="PENDING",
+        )
+
+        mock_nested = AsyncMock()
+        mock_nested.__aenter__ = AsyncMock(return_value=None)
+        mock_nested.__aexit__ = AsyncMock(return_value=None)
+        mock_db_session.begin_nested = MagicMock(return_value=mock_nested)
+
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = mock_app
+        mock_db_session.execute.return_value = mock_result
+
+        result = await repository.update_status(app_id, "MANUAL_REVIEW", cibil_score=680)
+
+        assert result is True
+        assert mock_app.status == "MANUAL_REVIEW"
+        assert mock_app.cibil_score == 680
+
+    @pytest.mark.asyncio
+    async def test_update_status_without_cibil_score(self, repository, mock_db_session):
+        """Test updating status without providing CIBIL score."""
+        app_id = uuid.uuid4()
+        mock_app = Application(
+            id=app_id,
+            pan_number="ABCDE1234F",
+            monthly_income_inr=Decimal("50000.00"),
+            loan_amount_inr=Decimal("200000.00"),
+            status="PENDING",
+            cibil_score=None,
+        )
+
+        mock_nested = AsyncMock()
+        mock_nested.__aenter__ = AsyncMock(return_value=None)
+        mock_nested.__aexit__ = AsyncMock(return_value=None)
+        mock_db_session.begin_nested = MagicMock(return_value=mock_nested)
+
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = mock_app
+        mock_db_session.execute.return_value = mock_result
+
+        result = await repository.update_status(app_id, "PRE_APPROVED")
+
+        assert result is True
+        assert mock_app.status == "PRE_APPROVED"
+        assert mock_app.cibil_score is None
+
+    @pytest.mark.asyncio
+    async def test_update_status_idempotency_already_processed(self, repository, mock_db_session):
+        """Test idempotency: updating already processed application returns False."""
+        app_id = uuid.uuid4()
+
+        # Mock application with PRE_APPROVED status (already processed)
+        mock_app = Application(
+            id=app_id,
+            pan_number="ABCDE1234F",
+            monthly_income_inr=Decimal("75000.00"),
+            loan_amount_inr=Decimal("500000.00"),
+            status="PRE_APPROVED",  # Already processed
+            cibil_score=750,
+        )
+
+        mock_nested = AsyncMock()
+        mock_nested.__aenter__ = AsyncMock(return_value=None)
+        mock_nested.__aexit__ = AsyncMock(return_value=None)
+        mock_db_session.begin_nested = MagicMock(return_value=mock_nested)
+
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = mock_app
+        mock_db_session.execute.return_value = mock_result
+
+        # Try to update already processed application
+        result = await repository.update_status(app_id, "REJECTED", cibil_score=600)
+
+        # Verify update was rejected (idempotency check)
+        assert result is False
+        assert mock_app.status == "PRE_APPROVED"  # Status unchanged
+        assert mock_app.cibil_score == 750  # Score unchanged
+
+    @pytest.mark.asyncio
+    async def test_update_status_non_existent_application(self, repository, mock_db_session):
+        """Test updating non-existent application returns False."""
+        non_existent_id = uuid.uuid4()
+
+        mock_nested = AsyncMock()
+        mock_nested.__aenter__ = AsyncMock(return_value=None)
+        mock_nested.__aexit__ = AsyncMock(return_value=None)
+        mock_db_session.begin_nested = MagicMock(return_value=mock_nested)
+
+        # Mock query returning None (application not found)
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = None
+        mock_db_session.execute.return_value = mock_result
+
+        result = await repository.update_status(non_existent_id, "PRE_APPROVED", cibil_score=750)
+
+        assert result is False
+
+    @pytest.mark.asyncio
+    async def test_update_status_database_error_rolls_back(self, repository, mock_db_session):
+        """Test that database error triggers rollback."""
+        app_id = uuid.uuid4()
+
+        # Mock application with PENDING status
+        mock_app = Application(
+            id=app_id,
+            pan_number="ABCDE1234F",
+            monthly_income_inr=Decimal("50000.00"),
+            loan_amount_inr=Decimal("200000.00"),
+            status="PENDING",
+        )
+
+        # Mock nested transaction
+        mock_nested = AsyncMock()
+        mock_nested.__aenter__ = AsyncMock(return_value=None)
+        mock_nested.__aexit__ = AsyncMock(return_value=None)
+        mock_db_session.begin_nested = MagicMock(return_value=mock_nested)
+
+        # Mock query result
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = mock_app
+        mock_db_session.execute.return_value = mock_result
+
+        # Mock commit to raise SQLAlchemyError
+        mock_db_session.commit.side_effect = SQLAlchemyError("Update failed")
+
+        # Verify DatabaseError is raised
+        with pytest.raises(DatabaseError) as exc_info:
+            await repository.update_status(app_id, "PRE_APPROVED", cibil_score=750)
+
+        # Verify rollback was called
+        mock_db_session.rollback.assert_awaited_once()
+        assert "Failed to update application" in str(exc_info.value)
+
+    @pytest.mark.asyncio
+    async def test_update_status_uses_select_for_update(self, repository, mock_db_session):
+        """Test that update_status uses SELECT FOR UPDATE for locking."""
+        app_id = uuid.uuid4()
+        mock_app = Application(
+            id=app_id,
+            pan_number="ABCDE1234F",
+            monthly_income_inr=Decimal("50000.00"),
+            loan_amount_inr=Decimal("200000.00"),
+            status="PENDING",
+        )
+
+        mock_nested = AsyncMock()
+        mock_nested.__aenter__ = AsyncMock(return_value=None)
+        mock_nested.__aexit__ = AsyncMock(return_value=None)
+        mock_db_session.begin_nested = MagicMock(return_value=mock_nested)
+
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = mock_app
+        mock_db_session.execute.return_value = mock_result
+
+        await repository.update_status(app_id, "PRE_APPROVED", cibil_score=750)
+
+        # Verify execute was called (for SELECT FOR UPDATE query)
+        mock_db_session.execute.assert_awaited_once()
+
+
+class TestApplicationRepositoryGetByStatus:
+    """Test suite for repository get_by_status operations."""
+
+    @pytest.mark.asyncio
+    async def test_get_by_status_pending_applications(self, repository, mock_db_session):
+        """Test retrieving all PENDING applications."""
+        # Mock applications
+        mock_apps = [
+            Application(
+                id=uuid.uuid4(),
+                pan_number="AAAAA1111A",
+                monthly_income_inr=Decimal("50000.00"),
+                loan_amount_inr=Decimal("200000.00"),
+                status="PENDING",
+            ),
+            Application(
+                id=uuid.uuid4(),
+                pan_number="BBBBB2222B",
+                monthly_income_inr=Decimal("60000.00"),
+                loan_amount_inr=Decimal("300000.00"),
+                status="PENDING",
+            ),
+        ]
+
+        # Mock query result
+        mock_result = MagicMock()
+        mock_result.scalars.return_value.all.return_value = mock_apps
+        mock_db_session.execute.return_value = mock_result
+
+        # Get PENDING applications
+        pending_apps = await repository.get_by_status("PENDING")
+
+        # Verify results
+        assert len(pending_apps) == 2
+        assert all(app.status == "PENDING" for app in pending_apps)
+
+    @pytest.mark.asyncio
+    async def test_get_by_status_approved_applications(self, repository, mock_db_session):
+        """Test retrieving all PRE_APPROVED applications."""
+        mock_apps = [
+            Application(
+                id=uuid.uuid4(),
+                pan_number="AAAAA1111A",
+                monthly_income_inr=Decimal("80000.00"),
+                loan_amount_inr=Decimal("500000.00"),
+                status="PRE_APPROVED",
+                cibil_score=750,
+            )
+        ]
+
+        mock_result = MagicMock()
+        mock_result.scalars.return_value.all.return_value = mock_apps
+        mock_db_session.execute.return_value = mock_result
+
+        approved_apps = await repository.get_by_status("PRE_APPROVED")
+
+        assert len(approved_apps) == 1
+        assert approved_apps[0].status == "PRE_APPROVED"
+
+    @pytest.mark.asyncio
+    async def test_get_by_status_empty_result(self, repository, mock_db_session):
+        """Test retrieving applications when none match the status."""
+        # Mock empty result
+        mock_result = MagicMock()
+        mock_result.scalars.return_value.all.return_value = []
+        mock_db_session.execute.return_value = mock_result
+
+        # Query for REJECTED (none exist)
+        rejected_apps = await repository.get_by_status("REJECTED")
+
+        assert len(rejected_apps) == 0
+
+    @pytest.mark.asyncio
+    async def test_get_by_status_with_limit(self, repository, mock_db_session):
+        """Test retrieving applications with limit parameter."""
+        mock_apps = [
+            Application(
+                id=uuid.uuid4(),
+                pan_number=f"AAAAA{i:04d}A",
+                monthly_income_inr=Decimal("50000.00"),
+                loan_amount_inr=Decimal("200000.00"),
+                status="PENDING",
+            )
+            for i in range(3)
+        ]
+
+        mock_result = MagicMock()
+        mock_result.scalars.return_value.all.return_value = mock_apps
+        mock_db_session.execute.return_value = mock_result
+
+        # Get with limit=3
+        pending_apps = await repository.get_by_status("PENDING", limit=3)
+
+        assert len(pending_apps) == 3
+
+    @pytest.mark.asyncio
+    async def test_get_by_status_database_error_raises_exception(self, repository, mock_db_session):
+        """Test that database error raises DatabaseError."""
+        # Mock execute to raise SQLAlchemyError
+        mock_db_session.execute.side_effect = SQLAlchemyError("Query failed")
+
+        # Verify DatabaseError is raised
+        with pytest.raises(DatabaseError) as exc_info:
+            await repository.get_by_status("PENDING")
+
+        assert "Failed to get applications" in str(exc_info.value)
+
+    @pytest.mark.asyncio
+    async def test_get_by_status_rejected_applications(self, repository, mock_db_session):
+        """Test retrieving REJECTED applications."""
+        mock_apps = [
+            Application(
+                id=uuid.uuid4(),
+                pan_number="AAAAA1111A",
+                monthly_income_inr=Decimal("30000.00"),
+                loan_amount_inr=Decimal("200000.00"),
+                status="REJECTED",
+                cibil_score=600,
+            )
+        ]
+
+        mock_result = MagicMock()
+        mock_result.scalars.return_value.all.return_value = mock_apps
+        mock_db_session.execute.return_value = mock_result
+
+        rejected_apps = await repository.get_by_status("REJECTED")
+
+        assert len(rejected_apps) == 1
+        assert rejected_apps[0].status == "REJECTED"
+
+    @pytest.mark.asyncio
+    async def test_get_by_status_manual_review_applications(self, repository, mock_db_session):
+        """Test retrieving MANUAL_REVIEW applications."""
+        mock_apps = [
+            Application(
+                id=uuid.uuid4(),
+                pan_number="AAAAA1111A",
+                monthly_income_inr=Decimal("50000.00"),
+                loan_amount_inr=Decimal("500000.00"),
+                status="MANUAL_REVIEW",
+                cibil_score=680,
+            )
+        ]
+
+        mock_result = MagicMock()
+        mock_result.scalars.return_value.all.return_value = mock_apps
+        mock_db_session.execute.return_value = mock_result
+
+        manual_review_apps = await repository.get_by_status("MANUAL_REVIEW")
+
+        assert len(manual_review_apps) == 1
+        assert manual_review_apps[0].status == "MANUAL_REVIEW"

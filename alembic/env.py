@@ -1,19 +1,22 @@
 """Alembic environment configuration for async migrations."""
 
 import asyncio
+import sys
 from logging.config import fileConfig
-
-# Import app components
-from app.core.config import settings
-from app.core.database import Base
-
-# Import all models for autogenerate support
-from app.models.application import Application  # noqa: F401
-from sqlalchemy import pool
-from sqlalchemy.engine import Connection
-from sqlalchemy.ext.asyncio import async_engine_from_config
+from pathlib import Path
 
 from alembic import context  # type: ignore
+
+# Add shared library to path
+sys.path.insert(0, str(Path(__file__).parent.parent / "services" / "shared"))
+
+# Import shared components
+from shared.core.config import settings  # noqa: E402
+from shared.core.database import Base  # noqa: E402
+from shared.models.application import Application  # noqa: F401, E402
+from sqlalchemy import pool  # noqa: E402
+from sqlalchemy.engine import Connection  # noqa: E402
+from sqlalchemy.ext.asyncio import async_engine_from_config  # noqa: E402
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.

@@ -4,7 +4,8 @@ version = "1.0.0"
 description = "Event-driven microservices system for loan prequalification in Indian financial market"
 authors = ["Development Team"]
 readme = "README.md"
-packages = [{include = "app", from = "src"}]
+# Note: This is a monorepo with multiple microservices in services/ directory
+# Each service has its own pyproject.toml
 
 [tool.poetry.dependencies]
 python = "^3.11"
@@ -13,9 +14,9 @@ uvicorn = {extras = ["standard"], version = "^0.24.0"}
 pydantic = {extras = ["email"], version = "^2.0"}
 pydantic-settings = "^2.0"
 sqlalchemy = {extras = ["asyncio"], version = "^2.0"}
-asyncpg = "^0.29.0"
+asyncpg = "^0.30.0"
 alembic = "^1.12.0"
-aiokafka = "^0.8.1"
+aiokafka = "^0.12.0"
 python-dotenv = "^1.0.0"
 structlog = "^23.2.0"
 pybreaker = "^1.0.1"
@@ -40,6 +41,7 @@ line-length = 100
 target-version = "py311"
 select = ["E", "F", "I", "N", "W", "UP"]
 ignore = ["E501"]
+exclude = ["get-pip.py"]
 
 [tool.black]
 line-length = 100
@@ -58,17 +60,21 @@ ignore_missing_imports = true
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
-testpaths = ["tests"]
+testpaths = ["services/prequal-api/tests", "services/credit-service/tests", "services/decision-service/tests"]
 python_files = ["test_*.py"]
 python_functions = ["test_*"]
-addopts = "--cov=src/app --cov-report=term-missing --cov-report=html --cov-fail-under=85"
+addopts = "--cov=services --cov-report=term-missing --cov-report=html --cov-fail-under=85"
 filterwarnings = [
     "ignore::DeprecationWarning"
 ]
+markers = [
+    "integration: marks tests as integration tests (require infrastructure)",
+    "e2e: marks tests as end-to-end tests (require full system)",
+]
 
 [tool.coverage.run]
-source = ["src"]
-omit = ["*/tests/*", "*/__pycache__/*", "*/venv/*"]
+source = ["services"]
+omit = ["*/tests/*", "*/__pycache__/*", "*/venv/*", "*/get-pip.py"]
 
 [tool.coverage.report]
 exclude_lines = [
